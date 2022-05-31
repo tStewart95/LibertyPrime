@@ -4,6 +4,7 @@ import random
 
 import discord
 from discord.ext import commands
+from discord.utils import get
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,7 +13,8 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 ################
 #### CONFIG ####
 ################
-bot = commands.Bot(command_prefix='!')
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='!', intents=intents)
 sfx_dir = "sfx/"
 
 ################
@@ -27,6 +29,17 @@ async def on_ready():
     # Announce yourself
 
 ################
+###  EVENTS  ###
+################
+
+@bot.event
+async def on_member_join(member):
+    # Send the welcome message
+    await member.send('Welcome!')
+    # Add default role
+    role = get(member.guild.roles, name="Constituent")
+    await member.add_roles(role)
+################
 ### COMMANDS ###
 ################
 
@@ -39,7 +52,7 @@ async def sfx(ctx, sound : str):
     # Grab the user who sent the command
     user = ctx.message.author
     #Only play if the user is in a voice channel
-    if user.voice.channel != None:
+    if user.voice != None:
         voice_channel = user.voice.channel
         #Find a sound effect that closely matches
         found_sfx = search_sfx(sound)
@@ -48,8 +61,9 @@ async def sfx(ctx, sound : str):
             #Have the bot join the channel
             try:
                 vc = await voice_channel.connect()
-            except:
-                await ctx.send("SFX already playing")
+            except Exception as e:
+                await ctx.send("ERROR", e)
+                print(e)
                 return
             response = 'Playing `' + found_sfx.split('/')[1] +'`'
             await ctx.send(response)
