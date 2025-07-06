@@ -1,12 +1,9 @@
 import os
 import glob
 import random
-import time
-import asyncio
 
 import discord
 from discord.ext import commands
-from discord.utils import get
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,8 +12,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 ################
 #### CONFIG ####
 ################
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!')
 sfx_dir = "sfx/"
 
 ################
@@ -31,17 +27,6 @@ async def on_ready():
     # Announce yourself
 
 ################
-###  EVENTS  ###
-################
-
-@bot.event
-async def on_member_join(member):
-    # Send the welcome message
-    await member.send('Welcome!')
-    # Add default role
-    role = get(member.guild.roles, name="Constituent")
-    await member.add_roles(role)
-################
 ### COMMANDS ###
 ################
 
@@ -54,23 +39,23 @@ async def sfx(ctx, sound : str):
     # Grab the user who sent the command
     user = ctx.message.author
     #Only play if the user is in a voice channel
-    if user.voice != None:
+    if user.voice.channel != None:
         voice_channel = user.voice.channel
         #Find a sound effect that closely matches
         found_sfx = search_sfx(sound)
 
         if found_sfx != "":
             #Have the bot join the channel
-
-            vc = await voice_channel.connect()
-            print("Connected to voice channel: ", vc)
-
+            try:
+                vc = await voice_channel.connect()
+            except:
+                await ctx.send("SFX already playing")
+                return
             response = 'Playing `' + found_sfx.split('/')[1] +'`'
             await ctx.send(response)
+            vc.play(discord.FFmpegPCMAudio(found_sfx), after=lambda e: bot.loop.create_task(vc.disconnect()))
             vc.source = discord.PCMVolumeTransformer(vc.source)
             vc.source.volume = 2.0
-            vc.play(discord.FFmpegPCMAudio(found_sfx))
-            voice_channel.disconnect()
 
         else:
             await ctx.send('`' + sound +'` not found')
@@ -128,7 +113,6 @@ async def getsfx(ctx):
     #Loop through and DM pages
     for message in get_sfx_list():
         await ctx.author.send(message)
-        await time.sleep(0.1)
 
 def get_sfx_list():
     """
