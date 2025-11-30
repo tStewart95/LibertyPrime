@@ -22,7 +22,21 @@ class sfx(commands.Cog):
         self.bot = bot
         self.is_idle = False
         self.voice_client = None
+        self._voice_lock = asyncio.Lock()
+        self.volume = 1.0  # Default volume (100%)
         self.leave_if_idle.start()
+
+    @commands.command()
+    async def search(self, ctx, *, query):
+        f = glob.glob(os.path.join(sfx_dir, "*" + query + "*"))
+        if len(f) <= 0:
+            await ctx.send(f'No sounds found matching "{query}"')
+        else:
+            await ctx.send(f"Found {len(f)} matching sounds:")
+            found_sounds = []
+            for file in f:
+                found_sounds.append(file.split("/")[-1])
+            await ctx.send(f"{"\n".join(found_sounds)}")
 
     async def search_sfx(self, sound_str: str):
         """
@@ -30,7 +44,6 @@ class sfx(commands.Cog):
         """
 
         f = glob.glob(os.path.join(sfx_dir, sound_str + "*"))
-        print(f)
         filepath = ""
         if len(f) >= 1:
             try:
@@ -82,43 +95,58 @@ class sfx(commands.Cog):
     @commands.command()
     async def play(self, ctx, *, query):
         self.is_idle = False
-        """Plays a file from the local filesystem"""
+        async with self._voice_lock:
+            # Move to user's channel if needed
+            if ctx.author.voice:
+                user_channel = ctx.author.voice.channel
+                if ctx.voice_client is None:
+                    self.voice_client = await user_channel.connect()
+                elif ctx.voice_client.channel != user_channel:
+                    await ctx.voice_client.move_to(user_channel)
+                    self.voice_client = ctx.voice_client
+            else:
+                await ctx.send("You are not connected to a voice channel.")
+                return
 
-        # Move to user's channel if needed
+            found_sfx = await self.search_sfx(query)
+            if found_sfx == "":
+                await ctx.send(f"Could not find sound that starts with {query}")
+                return
+            else:
+                print(f"SFX Found: {found_sfx}")
+                source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(found_sfx))
+                source.volume = self.volume
 
-        if ctx.author.voice:
-            user_channel = ctx.author.voice.channel
-            if ctx.voice_client is None:
-                self.voice_client = await user_channel.connect()
-            elif ctx.voice_client.channel != user_channel:
-                await ctx.voice_client.move_to(user_channel)
+                def after_playing(error):
+                    if error:
+                        print(f"Player error: {error}")
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._disconnect_if_idle(), self.bot.loop
+                    )
+                    try:
+                        fut.result()
+                    except Exception as e:
+                        print(f"Error in after_playing: {e}")
+
+                ctx.voice_client.play(source, after=after_playing)
                 self.voice_client = ctx.voice_client
-        else:
-            await ctx.send("You are not connected to a voice channel.")
-            return
+                await ctx.send(f"Now playing: {os.path.basename(found_sfx)}")
 
-        found_sfx = await self.search_sfx(query)
-        if found_sfx == "":
-            await ctx.send(f"Could not find sound that starts with {query}")
-            return ""
-        else:
-            print("SFX Found: " + found_sfx)
-            source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(found_sfx))
-            ctx.voice_client.play(
-                source, after=lambda e: print(f"Player error: {e}") if e else None
-            )
-            self.voice_client = ctx.voice_client
-            await ctx.send(f"Now playing: {os.path.basename(found_sfx)}")
+    async def _disconnect_if_idle(self):
+        await asyncio.sleep(1)  # Give a moment for playback to finish
+        if self.voice_client and not self.voice_client.is_playing():
+            await self.voice_client.disconnect()
+            self.voice_client = None
 
     @commands.command()
     async def volume(self, ctx, volume: int):
-        """Changes the player's volume"""
-
-        if ctx.voice_client is None:
-            return await ctx.send("Not connected to a voice channel.")
-
-        ctx.voice_client.source.volume = volume / 100
-        await ctx.send(f"Changed volume to {volume}%")
+        """Changes the player's volume permanently until changed again"""
+        if not 0 <= volume <= 200:
+            return await ctx.send("Volume must be between 0 and 200.")
+        self.volume = volume / 100
+        if ctx.voice_client and ctx.voice_client.source:
+            ctx.voice_client.source.volume = self.volume
+        await ctx.send(f"Changed volume to {volume}% (will persist for future sounds)")
 
     @commands.command()
     async def stop(self, voice_client):
@@ -140,8 +168,13 @@ class sfx(commands.Cog):
         """
 
         # Role check
-        if not any(role.name == "President" for role in ctx.author.roles):
-            await ctx.send("You need the 'Audio Engineer' role to use this command.")
+        if not any(
+            role.name == "President" or role.name == "Founding Father"
+            for role in ctx.author.roles
+        ):
+            await ctx.send(
+                "You need the 'President' or 'Founding Father' role to use this command."
+            )
             return
 
         files = ctx.message.attachments
