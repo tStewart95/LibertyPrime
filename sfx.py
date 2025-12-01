@@ -21,7 +21,6 @@ class sfx(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.is_idle = False
-        self.voice_client = None
         self._voice_lock = asyncio.Lock()
         self.volume = 1.0  # Default volume (100%)
         self.leave_if_idle.start()
@@ -58,31 +57,26 @@ class sfx(commands.Cog):
         if len(f) < 1:
             return ""
 
-    @tasks.loop(seconds=600.0)
-    async def leave_if_idle(self):
-        if self.voice_client is None:
+    @tasks.loop(seconds=6.0)
+    async def leave_if_idle(self, ctx):
+        if ctx.voice_client is None:
             return
         else:
-            if self.is_idle:
-                goodbye_sound = random.choice(goodbye_sounds)
-                source = discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(f"{sfx_dir}/{goodbye_sound}")
-                )
-                self.voice_client.play(source, after=self.after_playing)
-                self.voice_client = None
-            else:
-                self.is_idle = True
+            goodbye_sound = random.choice(goodbye_sounds)
+            source = discord.PCMVolumeTransformer(
+                discord.FFmpegPCMAudio(f"{sfx_dir}/{goodbye_sound}")
+            )
+            ctx.voice_client.play(source)
+            await ctx.voice_client.disconnect()
 
     @commands.command()
     async def join(self, ctx, *, channel: discord.VoiceChannel):
         """Joins a voice channel or moves if already connected."""
         if ctx.voice_client is not None:
             await ctx.voice_client.move_to(channel)
-            self.voice_client = ctx.voice_client
         else:
             print("Changing channels...")
             vc = await channel.connect()
-            self.voice_client = vc
 
     @commands.command()
     async def play(self, ctx, *, query):
@@ -95,10 +89,9 @@ class sfx(commands.Cog):
             if ctx.author.voice:
                 user_channel = ctx.author.voice.channel
                 if ctx.voice_client is None:
-                    self.voice_client = await user_channel.connect()
+                    await user_channel.connect()
                 elif ctx.voice_client.channel != user_channel:
                     await ctx.voice_client.move_to(user_channel)
-                    self.voice_client = ctx.voice_client
             else:
                 await ctx.send("You are not connected to a voice channel.")
                 return
@@ -112,26 +105,8 @@ class sfx(commands.Cog):
                 source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(found_sfx))
                 source.volume = self.volume
 
-                self.voice_client = ctx.voice_client
-                ctx.voice_client.play(source, after=self.after_playing)
+                ctx.voice_client.play(source)
                 await ctx.send(f"Now playing: {os.path.basename(found_sfx)}")
-
-    async def _disconnect_if_idle(self):
-        await asyncio.sleep(1)  # Give a moment for playback to finish
-        if self.voice_client and not self.voice_client.is_playing():
-            await self.voice_client.disconnect()
-            self.voice_client = None
-
-    def after_playing(self, error):
-        if error:
-            print(f"Player error: {error}")
-        fut = asyncio.run_coroutine_threadsafe(
-            self._disconnect_if_idle(), self.bot.loop
-        )
-        try:
-            fut.result()
-        except Exception as e:
-            print(f"Error in after_playing: {e}")
 
     @commands.command()
     async def volume(self, ctx, volume: int):
@@ -144,15 +119,20 @@ class sfx(commands.Cog):
         await ctx.send(f"Changed volume to {volume}% (will persist for future sounds)")
 
     @commands.command()
-    async def stop(self, voice_client):
-        """Stops and disconnects the bot from voice"""
+    async def stop(self, ctx):
+        """Stops the current sound effect"""
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+
+    @commands.command()
+    async def out(self, ctx):
+        """Says goodbye and disconnects the bot from voice"""
         source = discord.PCMVolumeTransformer(
             discord.FFmpegPCMAudio(f"{sfx_dir}/latern.mp3")
         )
-        voice_client.play(source)
+        ctx.voice_client.play(source)
         await asyncio.sleep(1.1)
-        await voice_client.disconnect()
-        voice_client = None
+        await ctx.voice_client.disconnect()
 
     # Add SFX
     @commands.command()
@@ -236,31 +216,13 @@ class sfx(commands.Cog):
             os.remove(found_sfx)
 
     @play.before_invoke
-    @stop.before_invoke
+    @out.before_invoke
     async def ensure_voice(self, ctx):
         if ctx.voice_client is None:
             if ctx.author.voice:
                 await ctx.author.voice.channel.connect()
-                self.voice_client = ctx.voice_client
             else:
                 await ctx.send("You are not connected to a voice channel.")
                 raise commands.CommandError("Author not connected to a voice channel.")
         elif ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-
-    @play.after_invoke
-    async def start_idle_loop(self):
-        if not self.leave_if_idle.is_running():
-            print("starting idle loop")
-            try:
-                print("calling start")
-                task = self.leave_if_idle.start(self)
-                print("called start")
-                print(f"{task}")
-            except:
-                print("error starting loop")
-            if task is None:
-                print("got none from start loop")
-        else:
-            print("re-starting idle loop")
-            self.leave_if_idle.restart(self)
