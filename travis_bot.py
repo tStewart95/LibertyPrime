@@ -43,7 +43,9 @@ async def on_voice_state_update(
 ):
     if not bot.user or member.id == bot.user.id:
         return
-    if not before.channel and after.channel:
+    if (
+        not before.channel and after.channel
+    ):  # User joined a voice channel, not switching channels
         if "tstew" in member.name:
             voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
             if isinstance(voice_client, discord.VoiceClient):

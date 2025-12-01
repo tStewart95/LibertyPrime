@@ -20,10 +20,35 @@ goodbye_sounds = [
 class sfx(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.is_idle = False
         self._voice_lock = asyncio.Lock()
+        self.idle_count = 0
         self.volume = 1.0  # Default volume (100%)
-        self.leave_if_idle.start()
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ):
+        print("Voice state updated")
+        if member.id == self.bot.user.id:
+            if after.channel:
+                print("Bot joined a voice channel")
+                voice_client = discord.utils.get(
+                    self.bot.voice_clients, guild=member.guild
+                )
+                if isinstance(voice_client, discord.VoiceClient):
+                    await voice_client.move_to(after.channel)
+                else:
+                    voice_client = await after.channel.connect()
+                if isinstance(voice_client, discord.VoiceClient):
+                    print("Starting idle check loop")
+                    self.leave_if_idle.start(voice_client)
+            else:
+                print("Bot left the voice channel")
+                self.leave_if_idle.cancel()
+                self.idle_count = 0
 
     @commands.command()
     async def search(self, ctx, *, query):
@@ -57,17 +82,23 @@ class sfx(commands.Cog):
         if len(f) < 1:
             return ""
 
-    @tasks.loop(seconds=6.0)
-    async def leave_if_idle(self, ctx):
-        if ctx.voice_client is None:
+    @tasks.loop(seconds=1)
+    async def leave_if_idle(self, voice_client: discord.VoiceClient):
+        if voice_client is None:
             return
-        else:
+        if voice_client.is_playing():
+            self.idle_count = 0
+        if self.idle_count > 8:
             goodbye_sound = random.choice(goodbye_sounds)
             source = discord.PCMVolumeTransformer(
                 discord.FFmpegPCMAudio(f"{sfx_dir}/{goodbye_sound}")
             )
-            ctx.voice_client.play(source)
-            await ctx.voice_client.disconnect()
+            voice_client.play(source)
+            await asyncio.sleep(3)
+            await voice_client.disconnect()
+            self.leave_if_idle.cancel()
+        else:
+            self.idle_count += 1
 
     @commands.command()
     async def join(self, ctx, *, channel: discord.VoiceChannel):
@@ -83,7 +114,6 @@ class sfx(commands.Cog):
         """Plays a sound from the sfx/ directory.
         query: beginning of the sound file name to play
         """
-        self.is_idle = False
         async with self._voice_lock:
             # Move to user's channel if needed
             if ctx.author.voice:
