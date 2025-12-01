@@ -91,7 +91,6 @@ class sfx(commands.Cog):
             print("Changing channels...")
             vc = await channel.connect()
             self.voice_client = vc
-            continue
 
     @commands.command()
     async def play(self, ctx, *, query):
