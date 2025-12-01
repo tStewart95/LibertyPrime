@@ -88,13 +88,14 @@ class sfx(commands.Cog):
             return
         if voice_client.is_playing():
             self.idle_count = 0
-        if self.idle_count > 8:
+        if self.idle_count > 300:  # 5 minutes
             goodbye_sound = random.choice(goodbye_sounds)
             source = discord.PCMVolumeTransformer(
                 discord.FFmpegPCMAudio(f"{sfx_dir}/{goodbye_sound}")
             )
             voice_client.play(source)
-            await asyncio.sleep(3)
+            while voice_client.is_playing():
+                await asyncio.sleep(0.5)
             await voice_client.disconnect()
             self.leave_if_idle.cancel()
         else:
