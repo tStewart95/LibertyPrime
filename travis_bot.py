@@ -7,6 +7,7 @@ from typing import List
 import discord
 from discord.ext import commands
 import sfx
+import ytdl_bot
 from dotenv import load_dotenv
 
 intents = discord.Intents.default()
@@ -56,9 +57,9 @@ async def on_voice_state_update(
                 voice_client.play(source)
 
 
-# List SFX
 @bot.command(name="getsfx")
 async def getsfx(ctx: commands.Context):
+    """DMs a list of available sound effects to the user."""
     # Loop through and DM pages
     for message in get_sfx_list():
         await ctx.author.send(message)
@@ -95,6 +96,7 @@ async def main():
         raise RuntimeError("DISCORD_TOKEN is not set in the environment.")
     async with bot:
         await bot.add_cog(sfx.sfx(bot))
+        await bot.add_cog(ytdl_bot.Music(bot))
         await bot.start(TOKEN)
 
 

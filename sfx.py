@@ -63,22 +63,14 @@ class sfx(commands.Cog):
         if self.voice_client is None:
             return
         else:
-            print("in idle loop")
-            print(f"is_idle: {self.is_idle}")
             if self.is_idle:
-                print("Idle for too long, bye!")
                 goodbye_sound = random.choice(goodbye_sounds)
-                length = dictmaker.get_length_seconds(f"{sfx_dir}/{goodbye_sound}")
-                print(f"length of sound clip: {length}")
                 source = discord.PCMVolumeTransformer(
                     discord.FFmpegPCMAudio(f"{sfx_dir}/{goodbye_sound}")
                 )
-                self.voice_client.play(source)
-                await asyncio.sleep(length)
-                await self.voice_client.disconnect()
+                self.voice_client.play(source, after=self.after_playing)
                 self.voice_client = None
             else:
-                print("I'm still useful")
                 self.is_idle = True
 
     @commands.command()
@@ -94,6 +86,9 @@ class sfx(commands.Cog):
 
     @commands.command()
     async def play(self, ctx, *, query):
+        """Plays a sound from the sfx/ directory.
+        query: beginning of the sound file name to play
+        """
         self.is_idle = False
         async with self._voice_lock:
             # Move to user's channel if needed
@@ -117,19 +112,8 @@ class sfx(commands.Cog):
                 source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(found_sfx))
                 source.volume = self.volume
 
-                def after_playing(error):
-                    if error:
-                        print(f"Player error: {error}")
-                    fut = asyncio.run_coroutine_threadsafe(
-                        self._disconnect_if_idle(), self.bot.loop
-                    )
-                    try:
-                        fut.result()
-                    except Exception as e:
-                        print(f"Error in after_playing: {e}")
-
-                ctx.voice_client.play(source, after=after_playing)
                 self.voice_client = ctx.voice_client
+                ctx.voice_client.play(source, after=self.after_playing)
                 await ctx.send(f"Now playing: {os.path.basename(found_sfx)}")
 
     async def _disconnect_if_idle(self):
@@ -137,6 +121,17 @@ class sfx(commands.Cog):
         if self.voice_client and not self.voice_client.is_playing():
             await self.voice_client.disconnect()
             self.voice_client = None
+
+    def after_playing(self, error):
+        if error:
+            print(f"Player error: {error}")
+        fut = asyncio.run_coroutine_threadsafe(
+            self._disconnect_if_idle(), self.bot.loop
+        )
+        try:
+            fut.result()
+        except Exception as e:
+            print(f"Error in after_playing: {e}")
 
     @commands.command()
     async def volume(self, ctx, volume: int):
